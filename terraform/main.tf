@@ -146,67 +146,67 @@ resource "aws_acm_certificate_validation" "cert" {
 }
 
 # CloudFront
-resource "aws_cloudfront_distribution" "cdn" {
-  origin {
-    domain_name = replace(aws_apigatewayv2_api.http_api.api_endpoint, "https://", "")
-    origin_id   = "apiGateway"
+# resource "aws_cloudfront_distribution" "cdn" {
+#   origin {
+#     domain_name = replace(aws_apigatewayv2_api.http_api.api_endpoint, "https://", "")
+#     origin_id   = "apiGateway"
 
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "https-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
-    }
-  }
+#     custom_origin_config {
+#       http_port              = 80
+#       https_port             = 443
+#       origin_protocol_policy = "https-only"
+#       origin_ssl_protocols   = ["TLSv1.2"]
+#     }
+#   }
 
-  enabled         = true
-  is_ipv6_enabled = true
+#   enabled         = true
+#   is_ipv6_enabled = true
 
-  default_cache_behavior {
-    allowed_methods  = ["GET", "HEAD", "OPTIONS", "POST"]
-    cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "apiGateway"
+#   default_cache_behavior {
+#     allowed_methods  = ["GET", "HEAD", "OPTIONS", "POST"]
+#     cached_methods   = ["GET", "HEAD"]
+#     target_origin_id = "apiGateway"
 
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
+#     forwarded_values {
+#       query_string = false
+#       cookies {
+#         forward = "none"
+#       }
+#     }
 
-    viewer_protocol_policy = "redirect-to-https"
-    min_ttl     = 0
-    default_ttl = 0
-    max_ttl     = 0
-  }
+#     viewer_protocol_policy = "redirect-to-https"
+#     min_ttl     = 0
+#     default_ttl = 0
+#     max_ttl     = 0
+#   }
 
-  restrictions {
-    geo_restriction {
-      restriction_type = "none"
-    }
-  }
+#   restrictions {
+#     geo_restriction {
+#       restriction_type = "none"
+#     }
+#   }
 
-  viewer_certificate {
-    acm_certificate_arn      = aws_acm_certificate_validation.cert.certificate_arn
-    ssl_support_method       = "sni-only"
-    minimum_protocol_version = "TLSv1.2_2021"
-  }
+#   viewer_certificate {
+#     acm_certificate_arn      = aws_acm_certificate_validation.cert.certificate_arn
+#     ssl_support_method       = "sni-only"
+#     minimum_protocol_version = "TLSv1.2_2021"
+#   }
 
-  aliases = [var.domain_name]
-}
+#   aliases = [var.domain_name]
+# }
 
 # Route53 A record
-resource "aws_route53_record" "www" {
-  zone_id = var.hosted_zone_id
-  name    = var.domain_name
-  type    = "A"
+# resource "aws_route53_record" "www" {
+#   zone_id = var.hosted_zone_id
+#   name    = var.domain_name
+#   type    = "A"
 
-  alias {
-    name                   = aws_cloudfront_distribution.cdn.domain_name
-    zone_id                = aws_cloudfront_distribution.cdn.hosted_zone_id
-    evaluate_target_health = false
-  }
-}
+#   alias {
+#     name                   = aws_cloudfront_distribution.cdn.domain_name
+#     zone_id                = aws_cloudfront_distribution.cdn.hosted_zone_id
+#     evaluate_target_health = false
+#   }
+# }
 
 # GitHub OIDC Role for Actions
 resource "aws_iam_openid_connect_provider" "github" {
@@ -249,9 +249,9 @@ output "api_url" {
   value = aws_apigatewayv2_api.http_api.api_endpoint
 }
 
-output "cloudfront_url" {
-  value = "https://${var.domain_name}"
-}
+# output "cloudfront_url" {
+#   value = "https://${var.domain_name}"
+# }
 
 output "dynamodb_table" {
   value = aws_dynamodb_table.urls.name
