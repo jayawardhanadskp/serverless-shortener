@@ -1,0 +1,5 @@
+aws_region     = "us-east-1"
+domain_name    = "short.kasunjayawardhana.com"
+hosted_zone_id = "Z06022612792PVIKY9STS"
+g_owner        = "jayawardhanadskp"
+g_repo         = "serverless-shortener"
