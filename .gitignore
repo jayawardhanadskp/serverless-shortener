@@ -1,0 +1,15 @@
+# Terraform files
+.terraform/
+terraform.tfstate
+terraform.tfstate.*
+.terraform.lock.hcl
+
+# Lambda build artifacts
+lambda/*.zip
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
