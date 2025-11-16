@@ -1,4 +1,4 @@
-# DynamoDB Table
+# === DynamoDB Table (URL mapping) ===
 resource "aws_dynamodb_table" "urls" {
   name         = "UrlShortener"
   billing_mode = "PAY_PER_REQUEST"
@@ -10,7 +10,7 @@ resource "aws_dynamodb_table" "urls" {
   }
 }
 
-# IAM Role for Lambda
+# === IAM Role for Lambda ===
 resource "aws_iam_role" "lambda_role" {
   name = "url-shortener-lambda-role"
 
@@ -36,15 +36,14 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-
-# Lambda: Shorten
+# === Lambda: Shorten ===
 resource "aws_lambda_function" "shorten" {
-  filename         = "lambda/shorten.zip"
+  filename         = "${path.module}/../lambda/shorten.zip"
   function_name    = "url-shortener-shorten"
   role             = aws_iam_role.lambda_role.arn
   handler          = "index.shortenHandler"
   runtime          = "nodejs18.x"
-  source_code_hash = filebase64sha256("lambda/shorten.zip")
+  source_code_hash = filebase64sha256("${path.module}/../lambda/shorten.zip")
 
   environment {
     variables = {
@@ -54,14 +53,14 @@ resource "aws_lambda_function" "shorten" {
   }
 }
 
-# Lambda: Redirect
+# === Lambda: Redirect ===
 resource "aws_lambda_function" "redirect" {
-  filename         = "lambda/redirect.zip"
+  filename         = "${path.module}/../lambda/redirect.zip"
   function_name    = "url-shortener-redirect"
   role             = aws_iam_role.lambda_role.arn
   handler          = "index.redirectHandler"
   runtime          = "nodejs18.x"
-  source_code_hash = filebase64sha256("lambda/redirect.zip")
+  source_code_hash = filebase64sha256("${path.module}/../lambda/redirect.zip")
 
   environment {
     variables = {
@@ -70,7 +69,7 @@ resource "aws_lambda_function" "redirect" {
   }
 }
 
-# API Gateway
+# === API Gateway (HTTP API) ===
 resource "aws_apigatewayv2_api" "http_api" {
   name          = "url-shortener-api"
   protocol_type = "HTTP"
@@ -82,7 +81,7 @@ resource "aws_apigatewayv2_stage" "prod" {
   auto_deploy = true
 }
 
-# POST /shorten
+# Integrations and routes
 resource "aws_apigatewayv2_integration" "shorten" {
   api_id             = aws_apigatewayv2_api.http_api.id
   integration_type   = "AWS_PROXY"
@@ -96,7 +95,6 @@ resource "aws_apigatewayv2_route" "shorten" {
   target    = "integrations/${aws_apigatewayv2_integration.shorten.id}"
 }
 
-# GET /{code}
 resource "aws_apigatewayv2_integration" "redirect" {
   api_id             = aws_apigatewayv2_api.http_api.id
   integration_type   = "AWS_PROXY"
@@ -110,8 +108,7 @@ resource "aws_apigatewayv2_route" "redirect" {
   target    = "integrations/${aws_apigatewayv2_integration.redirect.id}"
 }
 
-
-# Lambda Permissions
+# Lambda permissions for API Gateway
 resource "aws_lambda_permission" "apigw_shorten" {
   statement_id  = "AllowAPIGatewayInvokeShorten"
   action        = "lambda:InvokeFunction"
@@ -128,14 +125,37 @@ resource "aws_lambda_permission" "apigw_redirect" {
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*"
 }
 
+# === ACM Certificate (us-east-1 required for CloudFront) ===
+resource "aws_acm_certificate" "cert" {
+  provider          = aws.useast1
+  domain_name       = var.domain_name
+  validation_method = "DNS"
+  lifecycle {
+    create_before_destroy = true
+  }
+}
 
-# CloudFront
+resource "aws_route53_record" "cert_validation" {
+  zone_id = var.hosted_zone_id
+  name    = aws_acm_certificate.cert.domain_validation_options[0].resource_record_name
+  type    = aws_acm_certificate.cert.domain_validation_options[0].resource_record_type
+  records = [aws_acm_certificate.cert.domain_validation_options[0].resource_record_value]
+  ttl     = 60
+}
+
+resource "aws_acm_certificate_validation" "cert" {
+  provider                 = aws.useast1
+  certificate_arn          = aws_acm_certificate.cert.arn
+  validation_record_fqdns  = [aws_route53_record.cert_validation.fqdn]
+}
+
+# === CloudFront distribution ===
 resource "aws_cloudfront_distribution" "cdn" {
   origin {
+    # API Gateway endpoint: remove https:// prefix
     domain_name = replace(aws_apigatewayv2_api.http_api.api_endpoint, "https://", "")
     origin_id   = "apiGateway"
-    origin_path = "/${aws_apigatewayv2_stage.prod.name}"
-
+    # no origin_path – API Gateway root default stage is used
     custom_origin_config {
       http_port              = 80
       https_port             = 443
@@ -144,8 +164,9 @@ resource "aws_cloudfront_distribution" "cdn" {
     }
   }
 
-  enabled             = true
-  is_ipv6_enabled     = true
+  enabled         = true
+  is_ipv6_enabled = true
+
   default_cache_behavior {
     allowed_methods  = ["GET", "HEAD", "OPTIONS", "POST"]
     cached_methods   = ["GET", "HEAD"]
@@ -159,9 +180,10 @@ resource "aws_cloudfront_distribution" "cdn" {
     }
 
     viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 0
-    max_ttl                = 0
+
+    min_ttl     = 0
+    default_ttl = 0
+    max_ttl     = 0
   }
 
   restrictions {
@@ -171,7 +193,7 @@ resource "aws_cloudfront_distribution" "cdn" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = aws_acm_certificate.cert.arn
+    acm_certificate_arn      = aws_acm_certificate_validation.cert.certificate_arn
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.2_2021"
   }
@@ -179,25 +201,7 @@ resource "aws_cloudfront_distribution" "cdn" {
   aliases = [var.domain_name]
 }
 
-
-# ACM Certificate 
-resource "aws_acm_certificate" "cert" {
-  provider          = aws.useast1
-  domain_name       = var.domain_name
-  validation_method = "DNS"
-}
-
-provider "aws" {
-  alias  = "useast1"
-  region = "us-east-1"
-}
-
-# Route53 Record
-data "aws_route53_zone" "zone" {
-  name         = var.domain_name
-  private_zone = false
-}
-
+# Route53 A record pointing to CloudFront
 resource "aws_route53_record" "www" {
   zone_id = var.hosted_zone_id
   name    = var.domain_name
@@ -208,4 +212,42 @@ resource "aws_route53_record" "www" {
     zone_id                = aws_cloudfront_distribution.cdn.hosted_zone_id
     evaluate_target_health = false
   }
+}
+
+# === (Optional) Create GitHub OIDC provider and IAM role for Actions ===
+# This lets GitHub Actions assume a role without long-lived keys.
+resource "aws_iam_openid_connect_provider" "github" {
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"] # GitHub's thumbprint
+  url             = "https://token.actions.githubusercontent.com"
+}
+
+data "aws_iam_policy_document" "github_actions_assume" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.g_owner}/${var.g_repo}:ref:refs/heads/main"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_actions_role" {
+  name               = "github-actions-role-serverless-shortener"
+  assume_role_policy = data.aws_iam_policy_document.github_actions_assume.json
+}
+
+# Attach safe list of managed policies (narrow these if you want finer-grained permissions later)
+resource "aws_iam_role_policy_attachment" "attach_admin" {
+  role       = aws_iam_role.github_actions_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess" # for simplicity; restrict in production
 }
